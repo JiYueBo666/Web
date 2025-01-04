@@ -14,7 +14,6 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 async def generate_response(client, message: Message):
     """生成流式响应"""
     try:
-
         history_messages = [
             {"role": "system", "content": "you are a helpful assistant"}
         ]
@@ -28,17 +27,19 @@ async def generate_response(client, message: Message):
                 response_format={"type": "text"},
             )
 
-            # 逐块返回响应内容
             for chunk in completion:
                 if chunk.choices[0].delta.content:
-                    yield chunk.choices[0].delta.content
+                    content = chunk.choices[0].delta.content
+                    yield f"data: {content}\n\n"
+
+            yield "data: [DONE]\n\n"
 
         except Exception as e:
-            yield f"\n连接AI服务失败：{str(e)}\n"
+            yield f"data: 连接AI服务失败：{str(e)}\n\n"
             print(f"AI Service Error: {str(e)}")
 
     except Exception as e:
-        yield f"\n生成响应时发生错误：{str(e)}\n"
+        yield f"data: 生成响应时发生错误：{str(e)}\n\n"
         print(f"Generate Response Error: {str(e)}")
 
 
@@ -48,7 +49,13 @@ async def chat(message: Message, client=Depends(get_client)):
     print("Received message:", message.dict())
     try:
         return StreamingResponse(
-            generate_response(client, message), media_type="text/event-stream"
+            generate_response(client, message),
+            media_type="text/event-stream",  # 确保设置正确的媒体类型
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # 禁用 Nginx 缓冲（如果使用 Nginx）
+            },
         )
     except Exception as e:
         print("Chat Endpoint Error:", str(e))

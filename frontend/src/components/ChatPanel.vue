@@ -1,9 +1,10 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, nextTick, computed } from 'vue'
 
 const messages = ref([])
 const isWaitingResponse = ref(false)
 const currentSessionId = ref(1)
+const currentResponse = ref('') // 新增：用于存储当前正在接收的响应
 
 // 发送消息到服务器
 const sendMessageToServer = async (message) => {
@@ -13,9 +14,7 @@ const sendMessageToServer = async (message) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Accept': 'text/event-stream',
       },
-      credentials: 'include',
       body: JSON.stringify({
         role: 'user',
         content: message,
@@ -24,11 +23,7 @@ const sendMessageToServer = async (message) => {
       })
     })
     
-    console.log('Response status:', response.status)
-    
     if (!response.ok) {
-      const errorText = await response.text()
-      console.error('Error response:', errorText)
       throw new Error(`HTTP error! status: ${response.status}`)
     }
     
@@ -44,9 +39,12 @@ const handleServerResponse = async (response) => {
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   
-  // 创建AI回复消息
+  // 重置当前响应
+  currentResponse.value = ''
+  
+  // 创建一个新的响应式消息对象，直接绑定到 currentResponse
   const aiMessage = {
-    text: '',
+    text: computed(() => currentResponse.value), // 使用计算属性
     isSelf: false,
     time: new Date().toLocaleTimeString(),
     sessionId: currentSessionId.value
@@ -57,11 +55,33 @@ const handleServerResponse = async (response) => {
     while (true) {
       const { value, done } = await reader.read()
       if (done) break
-      aiMessage.text += decoder.decode(value)
+      
+      const text = decoder.decode(value)
+      console.log(`Received chunk: ${text}`)
+      const lines = text.split('\n')
+      
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const content = line.slice(6).trim()
+          if (content === '[DONE]') {
+            continue
+          }
+          // 直接更新 currentResponse，会自动触发计算属性更新
+          currentResponse.value += content
+          
+          // 滚动到底部
+          nextTick(() => {
+            const chatArea = document.querySelector('.message-container')
+            if (chatArea) {
+              chatArea.scrollTop = chatArea.scrollHeight
+            }
+          })
+        }
+      }
     }
   } catch (error) {
     console.error('读取响应流失败:', error)
-    aiMessage.text = '抱歉，接收消息时发生错误'
+    currentResponse.value += '\n[接收消息时发生错误]'
   } finally {
     isWaitingResponse.value = false
   }
@@ -120,6 +140,7 @@ const startNewSession = () => {
         <input type="radio" id="englishOption" name="options" value="value2">
         <label for="englishOption">英语</label>
       </div>
+      <button id = "setting">&#8617; 设置</button>
     </form>
     <div id="rightBar">
       <div id="chatArea">
@@ -127,7 +148,10 @@ const startNewSession = () => {
           <div v-for="(msg, index) in messages" 
                :key="index" 
                :class="['message', msg.isSelf ? 'self' : 'other']">
-            <div class="message-content">{{ msg.text }}</div>
+            <div class="message-content">
+              <!-- 使用计算属性显示消息内容 -->
+              {{ typeof msg.text === 'function' ? msg.text() : msg.text }}
+            </div>
             <div class="message-time">{{ msg.time }}</div>
           </div>
         </div>
@@ -154,7 +178,7 @@ const startNewSession = () => {
 
 <style scoped>
 #rightBar {
-  background-color: rgb(248, 229, 229);
+  background-color: rgb(240, 233, 233);
   width: 85%;
   height: 100%;
   position: fixed;
@@ -168,7 +192,7 @@ const startNewSession = () => {
   top: 0;
   left: 0;
   width: 15%;
-  height: 80%;
+  height: 100%;
   background-image: linear-gradient(to bottom,
       transparent,
       transparent 10%,
@@ -184,6 +208,17 @@ const startNewSession = () => {
 }
 #sideBar >label,#sideBar>input{
   margin-bottom: 8px; /* 可选：添加一些间距 */
+}
+
+#setting{
+  border-radius: 50%;
+  background-color: #cbe2fc;
+  position: absolute;
+  bottom: 0;
+  width: 95px;
+  height: 95px;
+  left: 50%;
+  transform: translate(-50%, 0);
 }
 
 #chatArea {
@@ -243,6 +278,7 @@ const startNewSession = () => {
   padding: 20px;
   height: 100%;
   overflow-y: auto;
+  scroll-behavior: smooth; /* 添加平滑滚动效果 */
 }
 
 .message {
@@ -255,6 +291,7 @@ const startNewSession = () => {
   padding: 10px;
   border-radius: 10px;
   word-wrap: break-word;
+  white-space: pre-wrap; /* 保留换行和空格 */
   text-align: left;
 }
 
