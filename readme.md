@@ -13,13 +13,4 @@
 
 ![项目截图](assets/1.png)
 
-### 前端
-- Vue 3
-- Vue Router
-- Vite
-
-### 后端
-- FastAPI
-- OpenAI API
-- SQLAlchemy
 
