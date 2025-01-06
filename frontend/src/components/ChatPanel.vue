@@ -4,7 +4,8 @@ import { ref, nextTick, computed } from 'vue'
 const messages = ref([])
 const isWaitingResponse = ref(false)
 const currentSessionId = ref(1)
-const currentResponse = ref('') // 新增：用于存储当前正在接收的响应
+const chatHistory = ref([])
+const currentScene = ref('math')
 
 // 发送消息到服务器
 const sendMessageToServer = async (message) => {
@@ -19,7 +20,9 @@ const sendMessageToServer = async (message) => {
         role: 'user',
         content: message,
         stream: true,
-        is_json: false
+        is_json: false,
+        history: chatHistory.value,
+        scene: currentScene.value
       })
     })
     
@@ -39,49 +42,58 @@ const handleServerResponse = async (response) => {
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   
-  // 重置当前响应
-  currentResponse.value = ''
-  
-  // 创建一个新的响应式消息对象，直接绑定到 currentResponse
   const aiMessage = {
-    text: computed(() => currentResponse.value), // 使用计算属性
+    text: '',
     isSelf: false,
     time: new Date().toLocaleTimeString(),
     sessionId: currentSessionId.value
   }
   messages.value.push(aiMessage)
   
+  let fullResponse = ''
+
   try {
     while (true) {
       const { value, done } = await reader.read()
       if (done) break
       
-      const text = decoder.decode(value)
-      console.log(`Received chunk: ${text}`)
-      const lines = text.split('\n')
+      const chunk = decoder.decode(value)
+      const lines = chunk.split('\n')
       
       for (const line of lines) {
         if (line.startsWith('data: ')) {
-          const content = line.slice(6).trim()
-          if (content === '[DONE]') {
-            continue
-          }
-          // 直接更新 currentResponse，会自动触发计算属性更新
-          currentResponse.value += content
-          
-          // 滚动到底部
-          nextTick(() => {
+          const data = line.slice(6).trim()
+          if (data === '[DONE]' || !data) continue
+          try {
+            console.log('Received chunk:', data)
+            messages.value = [...messages.value.slice(0, -1), {
+              ...aiMessage,
+              text: aiMessage.text + data
+            }]
+            aiMessage.text += data
+            fullResponse += data
+            
+            await nextTick()
+            
             const chatArea = document.querySelector('.message-container')
             if (chatArea) {
               chatArea.scrollTop = chatArea.scrollHeight
             }
-          })
+          } catch (e) {
+            console.error('解析消息失败:', e)
+          }
         }
       }
     }
+    
+    chatHistory.value.push({
+      role: 'assistant',
+      content: fullResponse
+    })
+    
   } catch (error) {
     console.error('读取响应流失败:', error)
-    currentResponse.value += '\n[接收消息时发生错误]'
+    aiMessage.text = '抱歉，接收消息时发生错误'
   } finally {
     isWaitingResponse.value = false
   }
@@ -89,11 +101,18 @@ const handleServerResponse = async (response) => {
 
 // 添加用户消息
 const addUserMessage = (text) => {
+  // 添加用户消息到显示列表
   messages.value.push({
     text,
     isSelf: true,
     time: new Date().toLocaleTimeString(),
     sessionId: currentSessionId.value
+  })
+  
+  // 添加用户消息到历史记录
+  chatHistory.value.push({
+    role: 'user',
+    content: text
   })
 }
 
@@ -103,7 +122,7 @@ const send = async () => {
   const inputText = inputElement.value.trim()
   
   if (!inputText || isWaitingResponse.value) return
-  console.log('Sending message:', inputText)
+  
   try {
     isWaitingResponse.value = true
     addUserMessage(inputText)
@@ -125,7 +144,13 @@ const send = async () => {
 // 清除聊天记录并开始新会话
 const startNewSession = () => {
   messages.value = []
+  chatHistory.value = [] // 清空历史对话
   currentSessionId.value++
+}
+
+// 添加场景切换处理函数
+const handleSceneChange = (event) => {
+  currentScene.value = event.target.value === 'value1' ? 'math' : 'eng'
 }
 </script>
 
@@ -133,11 +158,24 @@ const startNewSession = () => {
   <div id="container">
     <form id="sideBar">
       <div class="radio-option">
-        <input type="radio" id="mathOption" name="options" value="value1" checked>
+        <input 
+          type="radio" 
+          id="mathOption" 
+          name="options" 
+          value="value1" 
+          checked
+          @change="handleSceneChange"
+        >
         <label for="mathOption">数学</label>
       </div>
       <div class="radio-option">
-        <input type="radio" id="englishOption" name="options" value="value2">
+        <input 
+          type="radio" 
+          id="englishOption" 
+          name="options" 
+          value="value2"
+          @change="handleSceneChange"
+        >
         <label for="englishOption">英语</label>
       </div>
       <button id = "setting">&#8617; 设置</button>

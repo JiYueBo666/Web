@@ -7,22 +7,34 @@ from schems.Message import Message
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from db.session import get_client
+from prompt.math_helper import math_helper_prompt
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 async def generate_response(client, message: Message):
     """生成流式响应"""
+
+    if message.scene == "math":
+        prompt = math_helper_prompt
+    else:
+        prompt = "you are a helpful assistant"
+
     try:
-        history_messages = [
-            {"role": "system", "content": "you are a helpful assistant"}
-        ]
-        history_messages.append({"role": "user", "content": message.content})
+        # 构建对话历史
+        history_messages = [{"role": "system", "content": prompt}]
+
+        # 添加历史对话记录
+        if message.history:
+            for hist_msg in message.history:
+                history_messages.append(
+                    {"role": hist_msg.role, "content": hist_msg.content}
+                )
 
         try:
             completion = client.chat.completions.create(
                 model="qwen-plus",
-                messages=history_messages,
+                messages=history_messages,  # 现在包含了完整的对话历史
                 stream=True,
                 response_format={"type": "text"},
             )
@@ -46,7 +58,6 @@ async def generate_response(client, message: Message):
 @router.post("/chat")
 async def chat(message: Message, client=Depends(get_client)):
     """聊天接口"""
-    print("Received message:", message.dict())
     try:
         return StreamingResponse(
             generate_response(client, message),
